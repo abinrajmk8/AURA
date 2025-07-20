@@ -1,3 +1,8 @@
+data/
+*/data
+cloned_repos/
+*/__pycache__/
+*/cloned_repos/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
