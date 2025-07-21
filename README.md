@@ -52,7 +52,16 @@ pip install -r requirements.txt
 cd osint-harvester
 ```
 
-### 5. Paste the .env file in osint-harvester folder
+### 5. Paste the .env file in osint-harvester folder OR decrypt .env.gpg  (one time configuration)
+
+encryption code 
+```bash
+gpg --symmetric --cipher-algo AES256 .env
+```
+decryption code 
+```bash
+gpg --decrypt .env.gpg > .env
+```
 
 ### 6. Run the OSINT Harvester
 ```bash
