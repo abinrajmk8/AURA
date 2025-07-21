@@ -1,5 +1,6 @@
-#AURA
+# AURA
 module 1 
+
 ## AURA: OSINT Threat Harvester
 
 > **Part of AURA (Adaptive Unified Response Agent)**  
@@ -24,16 +25,21 @@ Follow these steps to install and run the OSINT Threat Harvester:
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/aura-osint-harvester.git
-cd aura-osint-harvester
+git clone https://github.com/abinrajmk8/AURA.git
+cd AURA
 ```
 
-### 2. Create and Activate a Virtual Environment
+### 2. Create and Activate a Virtual Environment   (creation- only once )
+for linux
 ```bash
 python3 -m venv venv
-source venv/bin/activate        # For Linux/macOS
-# OR
-venv\Scripts\activate           # For Windows
+source venv/bin/activate        -
+```
+
+for windows
+```bash
+python3 -m venv venv
+venv\Scripts\activate           
 ```
 
 ### 3. Install Dependencies
@@ -43,13 +49,17 @@ pip install -r requirements.txt
 
 ### 4. Navigate to the Harvester Module
 ```bash
-cd osint_harvester
+cd osint-harvester
 ```
 
-### 5. Run the OSINT Harvester
+### 5. Paste the .env file in osint-harvester folder
+
+### 6. Run the OSINT Harvester
 ```bash
-python main.py
+python main.py --poc 
 ```
+
+also try other  command line arguments
 
 ---
 
