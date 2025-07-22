@@ -11,6 +11,7 @@ from correlator import correlate_pocs_with_feeds
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+from threat_forecaster import threat_forecast
 
 console = Console()
 #________AURA TITLE ______
@@ -60,6 +61,7 @@ def main():
     parser.add_argument("--live", action="store_true", help="Include Reddit, GitHub, and CISA live threat feeds")
     parser.add_argument("--poc", action="store_true", help="Parse GitHub PoC repos from data/github_repos.json")
     parser.add_argument("--correlate", action="store_true", help="Correlate parsed PoCs with CISA/NVD feeds")
+    parser.add_argument("--forecast", action="store_true", help="Run threat forecasting based on Reddit posts")
     args = parser.parse_args()
 
     console.print(Panel.fit(title, border_style="bright_magenta", padding=(1, 4)))
@@ -97,6 +99,12 @@ def main():
             "dateAdded", "shortDescription", "requiredAction", "dueDate",
             "knownRansomwareCampaignUse", "notes", "cwes"
         ])
+        if args.forecast:
+            console.print("\n[bold green][+][/bold green] Running threat forecasting...")
+            threat_forecasts=threat_forecast()
+            save_json_with_merge(threat_forecasts, "data/forecast.json", unique_key="cve_id")
+
+            
 
     # Optional: run GitHub PoC parser
     if args.poc:
