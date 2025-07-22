@@ -4,4 +4,6 @@ praw
 rich
 python-dotenv
 GitPython
-
+scikit-learn
+numpy
+re
