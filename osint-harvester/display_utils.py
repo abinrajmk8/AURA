@@ -23,7 +23,7 @@ def display_cve_table(cve_items):
 
     for cve in cve_items:
         severity = cve.get("severity","N/A")
-        colored_severity = f"[{severity_color.get(severity,'white')}]{severity}[/{severity_color.get(severity,"white")}]"
+        colored_severity = f"[{severity_color.get(severity,'white')}]{severity}[/{severity_color.get(severity,'white')}]"
 
         table.add_row(
             cve["id"],
