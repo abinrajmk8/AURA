@@ -119,6 +119,12 @@ def main():
             nvd_path="data/latest_cves.json",
             output_path="./data/parsed/correlated_output.json"
         )
+    
+    # Always run standardization at the end if any data was fetched
+    from utils.standardizer import Standardizer
+    console.print("\n[bold green][+][/bold green] Standardizing Intelligence Feed...")
+    std = Standardizer()
+    std.run()
 
 if __name__ == "__main__":
     main()

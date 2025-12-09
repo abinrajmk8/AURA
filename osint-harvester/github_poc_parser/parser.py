@@ -40,6 +40,25 @@ def parse_repo_files(repo_path):
             try:
                 with open(file, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
+                    
+                    # Try AI Analysis first (if available)
+                    try:
+                        from utils.ai_parser import AIParser
+                        ai_parser = AIParser()
+                        if ai_parser.llm:
+                            print(f"    [AI] Analyzing {os.path.basename(file)}...")
+                            ai_result = ai_parser.analyze_code(content)
+                            if "error" not in ai_result:
+                                # Merge AI results into IOCs
+                                if ai_result.get("target"): extracted["iocs"]["domains"].append(ai_result["target"])
+                                if ai_result.get("payload"): extracted["iocs"]["keywords"].append(ai_result["payload"])
+                                if ai_result.get("attack_type"): extracted["iocs"]["keywords"].append(ai_result["attack_type"])
+                    except ImportError:
+                        pass
+                    except Exception as e:
+                        print(f"    [AI] Failed: {e}")
+
+                    # Fallback/Complement with Regex
                     iocs = extract_ioc_from_text(content)
                 for key in iocs:
                     extracted["iocs"][key].extend(iocs[key])

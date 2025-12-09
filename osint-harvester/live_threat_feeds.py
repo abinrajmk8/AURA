@@ -12,20 +12,28 @@ import os
 #_____________________Reddit Feed ________________
 
 def fetch_reddit( subreddit = "netsec",keyword = "CVE",limit = 10):
-    reddit = praw.Reddit(
-            client_id=os.getenv("REDDIT_CLIENT_ID"),
-            client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-            user_agent=os.getenv("REDDIT_USER_AGENT")
-        )
-    posts = []
-    for post in reddit.subreddit(subreddit).search(keyword,limit=limit):
-        posts.append({
-            "title":post.title,
-            "url":post.url,
-            "score":post.score,
-            "created":datetime.fromtimestamp(post.created_utc, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
-        })
-    return posts
+    if not os.getenv("REDDIT_CLIENT_ID") or not os.getenv("REDDIT_CLIENT_SECRET"):
+        print("[!] Reddit credentials not found in .env. Skipping Reddit fetch.")
+        return []
+
+    try:
+        reddit = praw.Reddit(
+                client_id=os.getenv("REDDIT_CLIENT_ID"),
+                client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+                user_agent=os.getenv("REDDIT_USER_AGENT", "AURA_OSINT_BOT")
+            )
+        posts = []
+        for post in reddit.subreddit(subreddit).search(keyword,limit=limit):
+            posts.append({
+                "title":post.title,
+                "url":post.url,
+                "score":post.score,
+                "created":datetime.fromtimestamp(post.created_utc, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
+            })
+        return posts
+    except Exception as e:
+        print(f"[!] Error fetching Reddit: {e}")
+        return []
     
 #___________________github PoC  search ________________________
 
