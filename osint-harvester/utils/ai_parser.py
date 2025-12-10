@@ -1,51 +1,65 @@
 import json
 import os
-try:
-    from langchain_community.llms import Ollama
-    from langchain.prompts import PromptTemplate
-except ImportError:
-    print("LangChain or Ollama not installed. Please run: pip install langchain langchain-community ollama")
-    Ollama = None
+from google import genai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class AIParser:
-    def __init__(self, model="phi3"):
-        # Default to phi3 as it is lightweight and CPU-friendly
-        self.model_name = model
-        if Ollama:
-            self.llm = Ollama(model=model)
-        else:
-            self.llm = None
+    def __init__(self, model_name="gemini-2.5-flash"):
+        # The new client automatically looks for GEMINI_API_KEY
+        # But we support GEMINI_API from your .env too
+        api_key = os.getenv("GEMINI_API") or os.getenv("GEMINI_API_KEY")
+        
+        if not api_key:
+            print("[!] GEMINI_API key not found in .env")
+            self.client = None
+            return
+            
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = model_name
 
     def analyze_code(self, code_snippet):
-        if not self.llm:
-            return {"error": "LLM not initialized"}
+        if not self.client:
+            return {"error": "Gemini Client not initialized"}
 
-        template = """
-        You are a cybersecurity analyst. Analyze the following PoC code.
+        prompt = f"""
+        You are a cybersecurity analyst. Analyze the following PoC code or threat description.
         Extract:
         1. Target (IP/URL/Variable)
         2. Payload (The malicious string/byte sequence)
         3. Attack Type (RCE, SQLi, etc.)
+        4. Micro-Rule (A regex or snort-like signature to block this)
 
-        Code:
-        {code_snippet}
+        Code/Description:
+        {code_snippet[:8000]}
 
         Output strictly in JSON format:
         {{
           "target": "...",
           "payload": "...",
-          "attack_type": "..."
+          "attack_type": "...",
+          "micro_rule": "..."
         }}
         """
         
-        prompt = PromptTemplate.from_template(template)
-        chain = prompt | self.llm
         try:
-            # Limit context to first 2000 chars to save time/memory
-            result = chain.invoke({"code_snippet": code_snippet[:2000]})
-            return json.loads(result)
+            response = self.client.models.generate_content(
+                model=self.model_name, 
+                contents=prompt
+            )
+            # Clean markdown code blocks if present
+            text = response.text.replace("```json", "").replace("```", "").strip()
+            return json.loads(text)
         except Exception as e:
+            print(f"[!] Gemini Analysis Error: {e}")
             return {"error": str(e)}
+
+    def generate_embedding(self, text):
+        # Note: The new SDK might have a different way to call embeddings.
+        # For now, we are focusing on the analyze_code part as requested.
+        # If needed, we would use client.models.embed_content(...)
+        return []
 
 if __name__ == "__main__":
     # Test
@@ -55,5 +69,10 @@ if __name__ == "__main__":
     payload = "' OR 1=1 --"
     requests.get(target + "?id=" + payload)
     """
-    parser = AIParser(model="phi3") # Use phi3, tinyllama, or qwen2:0.5b for CPU
-    print(parser.analyze_code(sample_code))
+    parser = AIParser()
+    if parser.client:
+        print("Analyzing sample code...")
+        analysis = parser.analyze_code(sample_code)
+        print("Analysis:", json.dumps(analysis, indent=2))
+    else:
+        print("Skipping test, no API key.")

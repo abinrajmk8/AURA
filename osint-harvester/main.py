@@ -3,24 +3,24 @@ import argparse
 import json
 import csv
 import os
+import sys
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
+# Import existing modules
 from cve_fetcher import fetch_cves
 from live_threat_feeds import fetch_reddit, fetch_github, fetch_cisa
 from github_poc_parser.run_parser import run_github_poc_parser
 from github_poc_parser.feed_loader import load_repos_from_feed
 from correlator import correlate_pocs_with_feeds
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
 from threat_forecaster import threat_forecast
+from utils.standardizer import Standardizer
 
 console = Console()
-#________AURA TITLE ______
 title = Text()
-#title.append("[+] ", style="bold yellow")
-# title.append("Welcome to ", style="bold green")
 title.append("AURA", style="bold red")
 title.append(" OSINT HARVESTER", style="bold blue")
-
 
 def save_json_with_merge(new_data, path, unique_key):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -39,23 +39,9 @@ def save_json_with_merge(new_data, path, unique_key):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(merged, f, indent=2)
 
-def save_to_csv_from_json(json_path, csv_path, fieldnames):
-    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-    data = []
-    if os.path.exists(json_path):
-        with open(json_path, "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-            except json.JSONDecodeError:
-                pass
-
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows({key: item.get(key, "") for key in fieldnames} for item in data)
-
 def main():
     parser = argparse.ArgumentParser(description="Fetch and filter CVEs, optionally parse PoCs or fetch live OSINT feeds")
+    # Removed --mode argument as this is now purely harvester
     parser.add_argument("--keyword", type=str, help="Keyword to filter by (e.g. wordpress, iot, sql)")
     parser.add_argument("--severity", type=str, choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"], help="Minimum severity level")
     parser.add_argument("--live", action="store_true", help="Include Reddit, GitHub, and CISA live threat feeds")
@@ -66,6 +52,7 @@ def main():
 
     console.print(Panel.fit(title, border_style="bright_magenta", padding=(1, 4)))
 
+    # Harvest Mode Logic
     # Run CVE fetcher
     fetch_cves(args.keyword, args.severity)
 
@@ -91,26 +78,18 @@ def main():
         save_json_with_merge(github_repos, "data/github_repos.json", unique_key="url")
         save_json_with_merge(cisa_vulns, "data/cisa_vulns.json", unique_key="cveID")
 
-        # Generate CSVs
-        save_to_csv_from_json("data/reddit_posts.json", "data/reddit_posts.csv", fieldnames=["title", "url", "score", "created"])
-        save_to_csv_from_json("data/github_repos.json", "data/github_repos.csv", fieldnames=["name", "url", "updated"])
-        save_to_csv_from_json("data/cisa_vulns.json", "data/cisa_vulns.csv", fieldnames=[
-            "cveID", "vendorProject", "product", "vulnerabilityName",
-            "dateAdded", "shortDescription", "requiredAction", "dueDate",
-            "knownRansomwareCampaignUse", "notes", "cwes"
-        ])
+        # CSV generation removed as requested
+
         if args.forecast:
             console.print("\n[bold green][+][/bold green] Running threat forecasting...")
             threat_forecasts=threat_forecast()
             save_json_with_merge(threat_forecasts, "data/forecast.json", unique_key="cve_id")
 
-            
-
     # Optional: run GitHub PoC parser
     if args.poc:
-        console.print("\n[bold green][+][/bold green] Running GitHub PoC parser...")
+        console.print("\n[bold green][+][/bold green] Running GitHub PoC parser (Limit: 1 repo due to rate limits)...")
         repo_list = load_repos_from_feed("data/github_repos.json")
-        run_github_poc_parser(repo_list)
+        run_github_poc_parser(repo_list, limit=1)
 
     if args.correlate:
         correlate_pocs_with_feeds(
@@ -121,7 +100,6 @@ def main():
         )
     
     # Always run standardization at the end if any data was fetched
-    from utils.standardizer import Standardizer
     console.print("\n[bold green][+][/bold green] Standardizing Intelligence Feed...")
     std = Standardizer()
     std.run()
