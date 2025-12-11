@@ -1,0 +1,13 @@
+# Ignore logs and runtime files
+profiles/*/log/
+profiles/*/lib/
+
+# Ignore system files
+*.pyc
+__pycache__/
+*.swp
+.DS_Store
+
+# Ignore Docker data
+cowrie-data/
+

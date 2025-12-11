@@ -1,0 +1,12 @@
+services:
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: aura_honeypot
+    ports:
+      - "2222:2222" # SSH
+      - "2223:2223" # Telnet
+    volumes:
+      - ./cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg
+      - ./userdb.txt:/cowrie/cowrie-git/etc/userdb.txt
+      - ./log:/cowrie/cowrie-git/var/log/cowrie
+    restart: always

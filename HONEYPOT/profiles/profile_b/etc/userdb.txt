@@ -1,0 +1,8 @@
+# userdb.txt — colon-separated fields
+# Field1 = username, Field2 = unused, Field3 = password
+# '*' wildcard works; '!' at start of password denies that password
+abin:x:s3cr3t
+# keep commonly accepted defaults (optional)
+root:x:*
+*:x:*
+
