@@ -15,6 +15,7 @@ def print_menu():
     print("5. Path Traversal Attack   -> [Test OSINT Rule]")
     print("6. SYN Flood (DoS)         -> [Test ML Detection]")
     print("7. Zero Day Data Exfil     -> [Test ML Generalization]")
+    print("8. HTTPS Bot Attack        -> [Test JA3 Fingerprinting]")
     print("0. Exit")
     print("======================================")
 
@@ -99,6 +100,35 @@ def zero_day_exfiltration():
     except KeyboardInterrupt:
         print("\n[!] Attack Stopped.")
 
+def https_bot_attack():
+    print(f"\n[*] Simulating HTTPS Bot Attack (Python Requests)...")
+    print("[*] This will generate a standard Python JA3 fingerprint.")
+    
+    # We need a listening port 443 on localhost for this to work.
+    # Since we don't have a real web server, we'll just send the Client Hello
+    # using scapy's TLS layer directly to ensure we control the fingerprint 
+    # OR just try to connect and fail, but the Client Hello is sent first.
+    
+    import socket
+    import ssl
+    
+    try:
+        # Create a raw socket to send a Client Hello? 
+        # Easier: Just use python's ssl module to try to connect.
+        # The IDS sniffer will see the Client Hello before the connection fails.
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        
+        with socket.create_connection((TARGET_IP, 443), timeout=2) as sock:
+            with context.wrap_socket(sock, server_hostname=TARGET_IP) as ssock:
+                ssock.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                
+    except Exception as e:
+        # Expected to fail if no server is listening, but packet is sent
+        print(f"[+] Client Hello Sent. (Connection failed as expected: {e})")
+        print("[+] Check IDS for 'JA3_BLOCK'.")
+
 if __name__ == "__main__":
     while True:
         print_menu()
@@ -118,6 +148,8 @@ if __name__ == "__main__":
             syn_flood()
         elif choice == '7':
             zero_day_exfiltration()
+        elif choice == '8':
+            https_bot_attack()
         elif choice == '0':
             print("Exiting...")
             break

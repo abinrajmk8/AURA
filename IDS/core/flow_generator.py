@@ -57,11 +57,27 @@ class FlowGenerator:
             
         flow = self.active_flows[key]
         flow['last_time'] = timestamp
+        # Calculate Header Length (IP + TCP/UDP)
+        header_len = 0
+        if packet.haslayer('IP'):
+            header_len += packet['IP'].ihl * 4
+        if packet.haslayer('TCP'):
+            header_len += packet['TCP'].dataofs * 4
+        elif packet.haslayer('UDP'):
+            header_len += 8
+            
+        # Capture Window Size
+        win_size = 0
+        if packet.haslayer('TCP'):
+            win_size = packet['TCP'].window
+
         flow['packets'].append({
             'ts': timestamp,
             'len': len(packet),
             'dir': 'fwd' if packet['IP'].src == key[0] else 'bwd',
-            'flags': packet['TCP'].flags if packet.haslayer('TCP') else 0
+            'flags': packet['TCP'].flags if packet.haslayer('TCP') else 0,
+            'header_len': header_len,
+            'win': win_size
         })
         
         # Basic counters
@@ -102,15 +118,43 @@ class FlowGenerator:
         bwd_iats = np.diff(bwd_ts) if len(bwd_ts) > 1 else [0]
 
         # Flags (TCP)
+        # Scapy flags: F, S, R, P, A, U, E, C
         flags = [p['flags'] for p in packets]
-        # Scapy flags are objects, need to convert to int or check bits
-        # FIN=0x01, SYN=0x02, RST=0x04, PSH=0x08, ACK=0x10, URG=0x20
         
-        def count_flag(flag_val):
-            return sum(1 for f in flags if isinstance(f, int) and (f & flag_val))
-            # Note: Scapy flags might need str conversion in some versions, 
-            # but usually int comparison works if casted. 
-            # For MVP we'll assume int or handle simple string check if needed.
+        def count_flag(flag_char):
+            count = 0
+            for f in flags:
+                # Scapy flags can be FlagValue object or int
+                if isinstance(f, int):
+                    # Map char to bit mask if needed, but Scapy often returns objects that str() to 'PA' etc.
+                    # For simplicity in this hybrid object/int world:
+                    pass 
+                
+                # Convert to string representation for easy checking
+                f_str = str(f)
+                if flag_char in f_str:
+                    count += 1
+            return count
+
+        # Header Lengths
+        # We stored 'header_len' in process_packet now
+        fwd_header_len = sum(p['header_len'] for p in packets if p['dir'] == 'fwd')
+        bwd_header_len = sum(p['header_len'] for p in packets if p['dir'] == 'bwd')
+        
+        # Window Sizes (Initial)
+        init_win_fwd = 0
+        init_win_bwd = 0
+        
+        # Find first fwd packet with TCP layer
+        for p in packets:
+            if p['dir'] == 'fwd' and 'win' in p:
+                init_win_fwd = p['win']
+                break
+                
+        for p in packets:
+            if p['dir'] == 'bwd' and 'win' in p:
+                init_win_bwd = p['win']
+                break
 
         # Construct the 78-feature vector (Order MUST match model)
         features = {
@@ -144,12 +188,12 @@ class FlowGenerator:
             'Bwd IAT Std': np.std(bwd_iats),
             'Bwd IAT Max': np.max(bwd_iats) if len(bwd_iats) > 0 else 0,
             'Bwd IAT Min': np.min(bwd_iats) if len(bwd_iats) > 0 else 0,
-            'Fwd PSH Flags': 0, # Simplified for MVP
-            'Bwd PSH Flags': 0,
-            'Fwd URG Flags': 0,
+            'Fwd PSH Flags': count_flag('P'), 
+            'Bwd PSH Flags': 0, # Usually dataset only counts fwd PSH? Keeping 0 to match typical CIC flow
+            'Fwd URG Flags': count_flag('U'),
             'Bwd URG Flags': 0,
-            'Fwd Header Length': 0, # Requires deeper packet inspection
-            'Bwd Header Length': 0,
+            'Fwd Header Length': fwd_header_len,
+            'Bwd Header Length': bwd_header_len,
             'Fwd Packets/s': len(fwd_lens) / duration,
             'Bwd Packets/s': len(bwd_lens) / duration,
             'Min Packet Length': min(lens) if lens else 0,
@@ -157,19 +201,19 @@ class FlowGenerator:
             'Packet Length Mean': np.mean(lens) if lens else 0,
             'Packet Length Std': np.std(lens) if lens else 0,
             'Packet Length Variance': np.var(lens) if lens else 0,
-            'FIN Flag Count': 0, # Implement flag counting logic
-            'SYN Flag Count': 0,
-            'RST Flag Count': 0,
-            'PSH Flag Count': 0,
-            'ACK Flag Count': 0,
-            'URG Flag Count': 0,
-            'CWE Flag Count': 0,
-            'ECE Flag Count': 0,
+            'FIN Flag Count': count_flag('F'),
+            'SYN Flag Count': count_flag('S'),
+            'RST Flag Count': count_flag('R'),
+            'PSH Flag Count': count_flag('P'),
+            'ACK Flag Count': count_flag('A'),
+            'URG Flag Count': count_flag('U'),
+            'CWE Flag Count': count_flag('C'),
+            'ECE Flag Count': count_flag('E'),
             'Down/Up Ratio': len(bwd_lens)/len(fwd_lens) if len(fwd_lens) > 0 else 0,
             'Average Packet Size': np.mean(lens) if lens else 0,
             'Avg Fwd Segment Size': np.mean(fwd_lens) if fwd_lens else 0,
             'Avg Bwd Segment Size': np.mean(bwd_lens) if bwd_lens else 0,
-            'Fwd Header Length.1': 0, # Duplicate in dataset?
+            'Fwd Header Length.1': fwd_header_len, # Duplicate in dataset
             'Fwd Avg Bytes/Bulk': 0,
             'Fwd Avg Packets/Bulk': 0,
             'Fwd Avg Bulk Rate': 0,
@@ -180,11 +224,11 @@ class FlowGenerator:
             'Subflow Fwd Bytes': sum(fwd_lens),
             'Subflow Bwd Packets': len(bwd_lens),
             'Subflow Bwd Bytes': sum(bwd_lens),
-            'Init_Win_bytes_forward': 0,
-            'Init_Win_bytes_backward': 0,
+            'Init_Win_bytes_forward': init_win_fwd,
+            'Init_Win_bytes_backward': init_win_bwd,
             'act_data_pkt_fwd': len([l for l in fwd_lens if l > 0]),
-            'min_seg_size_forward': 0,
-            'Active Mean': 0, # Requires tracking idle times
+            'min_seg_size_forward': 20, # Default TCP header size
+            'Active Mean': 0, 
             'Active Std': 0,
             'Active Max': 0,
             'Active Min': 0,

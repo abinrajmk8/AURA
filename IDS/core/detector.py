@@ -8,6 +8,13 @@ import pandas as pd
 import warnings
 from rich.console import Console
 from .flow_generator import FlowGenerator
+from .ja3_analyzer import JA3Analyzer
+import sys
+import os
+
+# Add project root to path to import database module
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+from database.db_manager import DBManager
 
 # Suppress sklearn/lightgbm warnings about feature names
 warnings.filterwarnings("ignore", message=".*X does not have valid feature names.*")
@@ -17,13 +24,16 @@ console = Console()
 class Detector:
     def __init__(self, model_dir="IDS/models", feed_path="data/intelligence_feed.json"):
         self.flow_gen = FlowGenerator()
+        self.ja3_analyzer = JA3Analyzer()
+        self.db = DBManager()
         self.model = None
         self.scaler = None
         self.label_encoder = None
         self.osint_data = {
             "ips": set(),
             "urls": set(),
-            "rules": []
+            "rules": [],
+            "ja3_hashes": set()
         }
         
         self.load_models(model_dir)
@@ -53,7 +63,11 @@ class Detector:
                 
                 if type_ == "ipv4":
                     self.osint_data["ips"].add(val)
+                elif type_ == "ja3_hash":
+                    self.osint_data["ja3_hashes"].add(val)
                 elif type_ == "micro_rule":
+                    if not val:
+                        continue
                     try:
                         # Compile regex for speed
                         self.osint_data["rules"].append({
@@ -83,7 +97,10 @@ class Detector:
             payload = packet['Raw'].load.decode('utf-8', errors='ignore')
             for rule in self.osint_data["rules"]:
                 if rule["pattern"].search(payload):
-                    return f"OSINT_BLOCK: Rule Match - {rule['desc']}"
+                    # console.print(f"[yellow][DEBUG] OSINT Match! Rule: {rule['pattern'].pattern} | Payload: {payload[:50]}...[/yellow]")
+                    desc = f"OSINT_BLOCK: Rule Match - {rule['desc']}"
+                    self.db.log_alert(src_ip, "OSINT", desc, payload[:200], "BLOCKED")
+                    return desc
                     
         return None
 
@@ -116,6 +133,18 @@ class Detector:
             if src_ip: self.block_ip(src_ip)
             return {"action": "BLOCK", "reason": osint_verdict}
             
+        # Step 1.5: JA3 Fingerprinting (Encrypted Traffic)
+        if packet.haslayer('TCP') and (packet['TCP'].dport == 443 or packet['TCP'].sport == 443):
+            ja3_result = self.ja3_analyzer.process_packet(packet)
+            if ja3_result:
+                ja3_hash, ja3_str = ja3_result
+                console.print(f"[cyan][DEBUG] JA3 Calculated: {ja3_hash}[/cyan]")
+                if ja3_hash in self.osint_data["ja3_hashes"]:
+                    desc = f"JA3_BLOCK: Malicious Client Fingerprint ({ja3_hash})"
+                    self.db.log_alert(src_ip, "JA3", desc, ja3_str, "BLOCKED")
+                    if src_ip: self.block_ip(src_ip)
+                    return {"action": "BLOCK", "reason": desc}
+
         # Step 2: Flow Processing
         flow_key = self.flow_gen.process_packet(packet)
         if not flow_key:
@@ -142,10 +171,19 @@ class Detector:
                     
                 if label == "ATTACK":
                     # For ML anomalies, we might want to alert first, or block if confidence is high.
-                    # For this demo, we will block.
+                    desc = f"ML_ANOMALY: Behavioral Detection"
+                    self.db.log_alert(src_ip, "ML", desc, str(features), "ALERT")
                     if src_ip: self.block_ip(src_ip)
-                    return {"action": "ALERT", "reason": f"ML_ANOMALY: Behavioral Detection"}
-                    
+                    return {"action": "ALERT", "reason": desc}
+                
+                # Heuristic Fallback: Check for suspicious flags that ML might miss
+                # Index 32 is 'Fwd URG Flags'
+                if len(features) > 32 and features[32] > 0:
+                     reason = "HEURISTIC_ALERT: Suspicious TCP Flags (URG)"
+                     self.db.log_alert(src_ip, "HEURISTIC", reason, str(features), "ALERT")
+                     if src_ip: self.block_ip(src_ip)
+                     return {"action": "ALERT", "reason": reason}
+
             except Exception as e:
                 # console.print(f"[red]ML Error: {e}[/red]")
                 pass
