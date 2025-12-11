@@ -1,0 +1,27 @@
+.chart-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.chart-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg) 0;
+    overflow: hidden;
+}
+
+.chart-canvas {
+    max-width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .chart-canvas {
+        width: 100%;
+    }
+}

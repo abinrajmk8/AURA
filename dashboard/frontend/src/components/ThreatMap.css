@@ -1,0 +1,204 @@
+.threat-map {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.live-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-accent-success);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.live-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--color-accent-success);
+    border-radius: var(--radius-full);
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    box-shadow: 0 0 10px var(--color-accent-success);
+}
+
+.map-container {
+    flex: 1;
+    position: relative;
+    min-height: 300px;
+    margin: var(--spacing-lg) 0;
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.world-map {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 50px 50px;
+}
+
+.map-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.threat-marker {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    z-index: var(--z-base);
+}
+
+.marker-pulse {
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-full);
+    position: relative;
+    animation: markerPulse 2s ease-out infinite;
+}
+
+.marker-pulse::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    border-radius: var(--radius-full);
+    background: inherit;
+    opacity: 0.6;
+    animation: ripple 2s ease-out infinite;
+}
+
+@keyframes markerPulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.2);
+        opacity: 0.8;
+    }
+}
+
+@keyframes ripple {
+    0% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.6;
+    }
+
+    100% {
+        transform: translate(-50%, -50%) scale(3);
+        opacity: 0;
+    }
+}
+
+.marker-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border-primary);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: all var(--transition-base);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: var(--z-tooltip);
+}
+
+.marker-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: var(--color-bg-card);
+}
+
+.threat-marker:hover .marker-tooltip {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-12px);
+}
+
+.marker-tooltip strong {
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+}
+
+.marker-tooltip span {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+}
+
+.tooltip-severity {
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-top: var(--spacing-xs);
+}
+
+.map-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:
+        radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 70%);
+    pointer-events: none;
+}
+
+.threat-legend {
+    display: flex;
+    gap: var(--spacing-lg);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--color-border-secondary);
+    flex-wrap: wrap;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+}
+
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-full);
+    box-shadow: 0 0 8px currentColor;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .map-container {
+        min-height: 250px;
+    }
+
+    .threat-legend {
+        gap: var(--spacing-md);
+    }
+}
