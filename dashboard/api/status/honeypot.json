@@ -2,6 +2,7 @@
   "enabled": false,
   "status": "inactive",
   "pid": null,
-  "last_stopped": "2025-12-11T18:34:28.597453",
+  "last_started": null,
+  "last_stopped": "2025-12-11T20:33:26.502235",
   "uptime": "0s"
 }

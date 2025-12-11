@@ -370,5 +370,387 @@ def get_osint_results():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ========================================
+# Assessment Management Endpoints
+# ========================================
+
+@app.route('/api/alerts/assess', methods=['GET'])
+def get_alerts_for_assessment():
+    """Get alerts with pagination and filtering for review."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Get query parameters
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 20))
+        status = request.args.get('status', '')  # pending, approved, rejected, false_positive
+        severity = request.args.get('severity', '')
+        alert_type = request.args.get('alert_type', '')
+        search = request.args.get('search', '')
+        
+        # Build WHERE clause
+        where_clauses = []
+        params = []
+        
+        if status:
+            where_clauses.append("review_status = ?")
+            params.append(status)
+        
+        if severity:
+            where_clauses.append("severity = ?")
+            params.append(severity.upper())
+        
+        if alert_type:
+            where_clauses.append("alert_type = ?")
+            params.append(alert_type)
+        
+        if search:
+            where_clauses.append("(src_ip LIKE ? OR description LIKE ?)")
+            params.extend([f"%{search}%", f"%{search}%"])
+        
+        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+        
+        # Get total count (grouped)
+        cursor.execute(f"""
+            SELECT COUNT(*) as total FROM (
+                SELECT 1
+                FROM alerts
+                WHERE {where_sql}
+                GROUP BY src_ip, alert_type, severity, review_status, action_taken, description
+            )
+        """, params)
+        total = cursor.fetchone()['total']
+        
+        # Get paginated results (grouped)
+        offset = (page - 1) * per_page
+        cursor.execute(f"""
+            SELECT MAX(id) as id, MAX(timestamp) as timestamp, src_ip, dst_ip, alert_type, severity, 
+                   description, payload, action_taken, reviewed, review_status,
+                   reviewed_by, reviewed_at, review_notes, COUNT(*) as count
+            FROM alerts
+            WHERE {where_sql}
+            GROUP BY src_ip, alert_type, severity, review_status, action_taken, description
+            ORDER BY MAX(id) DESC
+            LIMIT ? OFFSET ?
+        """, params + [per_page, offset])
+        
+        alerts = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            "alerts": alerts,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "pages": (total + per_page - 1) // per_page
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/alerts/assess/<int:alert_id>', methods=['GET'])
+def get_alert_detail_for_assessment(alert_id):
+    """Get detailed information for a specific alert."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, timestamp, src_ip, dst_ip, alert_type, severity,
+                   description, payload, action_taken, reviewed, review_status,
+                   reviewed_by, reviewed_at, review_notes
+            FROM alerts
+            WHERE id = ?
+        """, (alert_id,))
+        
+        alert = cursor.fetchone()
+        conn.close()
+        
+        if alert:
+            return jsonify(dict(alert)), 200
+        else:
+            return jsonify({"error": "Alert not found"}), 404
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/alerts/assess/<int:alert_id>', methods=['PUT'])
+def update_alert_assessment(alert_id):
+    """Update review status of an alert."""
+    try:
+        data = request.json
+        review_status = data.get('review_status')  # approved, rejected, false_positive
+        review_notes = data.get('review_notes', '')
+        reviewed_by = data.get('reviewed_by', 'admin')
+        
+        if review_status not in ['approved', 'rejected', 'false_positive']:
+            return jsonify({"error": "Invalid review status"}), 400
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Get details of the alert being updated
+        cursor.execute("SELECT src_ip, alert_type, description FROM alerts WHERE id = ?", (alert_id,))
+        alert_details = cursor.fetchone()
+        
+        if alert_details:
+            # Update all similar pending alerts
+            cursor.execute("""
+                UPDATE alerts
+                SET reviewed = 1,
+                    review_status = ?,
+                    reviewed_by = ?,
+                    reviewed_at = CURRENT_TIMESTAMP,
+                    review_notes = ?
+                WHERE src_ip = ? 
+                AND alert_type = ? 
+                AND description = ?
+                AND review_status = 'pending'
+            """, (review_status, reviewed_by, review_notes, alert_details['src_ip'], alert_details['alert_type'], alert_details['description']))
+            
+            # Also ensure the specific ID is updated even if it wasn't pending (though it should be)
+            cursor.execute("""
+                UPDATE alerts
+                SET reviewed = 1,
+                    review_status = ?,
+                    reviewed_by = ?,
+                    reviewed_at = CURRENT_TIMESTAMP,
+                    review_notes = ?
+                WHERE id = ?
+            """, (review_status, reviewed_by, review_notes, alert_id))
+        else:
+            # Fallback for single update if not found (shouldn't happen)
+            cursor.execute("""
+                UPDATE alerts
+                SET reviewed = 1,
+                    review_status = ?,
+                    reviewed_by = ?,
+                    reviewed_at = CURRENT_TIMESTAMP,
+                    review_notes = ?
+                WHERE id = ?
+            """, (review_status, reviewed_by, review_notes, alert_id))
+        
+        conn.commit()
+        
+        # --- Save to CSV for Training ---
+        try:
+            import csv
+            import os
+            
+            csv_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'alerts.csv')
+            os.makedirs(os.path.dirname(csv_file), exist_ok=True)
+            
+            file_exists = os.path.isfile(csv_file)
+            
+            # Get the updated alerts to write to CSV
+            if alert_details:
+                cursor.execute("""
+                    SELECT timestamp, src_ip, dst_ip, alert_type, severity, description, payload, review_status
+                    FROM alerts
+                    WHERE src_ip = ? AND alert_type = ? AND description = ? AND review_status = ?
+                """, (alert_details['src_ip'], alert_details['alert_type'], alert_details['description'], review_status))
+            else:
+                cursor.execute("""
+                    SELECT timestamp, src_ip, dst_ip, alert_type, severity, description, payload, review_status
+                    FROM alerts
+                    WHERE id = ?
+                """, (alert_id,))
+                
+            updated_alerts = cursor.fetchall()
+            
+            with open(csv_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(['timestamp', 'src_ip', 'dst_ip', 'alert_type', 'severity', 'description', 'payload', 'label'])
+                
+                for alert in updated_alerts:
+                    writer.writerow([
+                        alert['timestamp'],
+                        alert['src_ip'],
+                        alert['dst_ip'],
+                        alert['alert_type'],
+                        alert['severity'],
+                        alert['description'],
+                        alert['payload'],
+                        alert['review_status']
+                    ])
+                    
+        except Exception as e:
+            print(f"Error saving to CSV: {e}")
+            
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "message": f"Alert {alert_id} marked as {review_status}"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/alerts/assess/bulk', methods=['PUT'])
+def bulk_update_assessment():
+    """Bulk update review status for multiple alerts."""
+    try:
+        data = request.json
+        alert_ids = data.get('alert_ids', [])
+        review_status = data.get('review_status')
+        reviewed_by = data.get('reviewed_by', 'admin')
+        
+        if not alert_ids:
+            return jsonify({"error": "No alert IDs provided"}), 400
+        
+        if review_status not in ['approved', 'rejected', 'false_positive']:
+            return jsonify({"error": "Invalid review status"}), 400
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        placeholders = ','.join('?' * len(alert_ids))
+        cursor.execute(f"""
+            UPDATE alerts
+            SET reviewed = 1,
+                review_status = ?,
+                reviewed_by = ?,
+                reviewed_at = CURRENT_TIMESTAMP
+            WHERE id IN ({placeholders})
+        """, [review_status, reviewed_by] + alert_ids)
+        
+        updated_count = cursor.rowcount
+        conn.commit()
+        
+        # --- Save to CSV for Training ---
+        try:
+            import csv
+            import os
+            
+            csv_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'alerts.csv')
+            os.makedirs(os.path.dirname(csv_file), exist_ok=True)
+            
+            file_exists = os.path.isfile(csv_file)
+            
+            # Get the updated alerts to write to CSV
+            cursor.execute(f"""
+                SELECT timestamp, src_ip, dst_ip, alert_type, severity, description, payload, review_status
+                FROM alerts
+                WHERE id IN ({placeholders})
+            """, alert_ids)
+            
+            updated_alerts = cursor.fetchall()
+            
+            with open(csv_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(['timestamp', 'src_ip', 'dst_ip', 'alert_type', 'severity', 'description', 'payload', 'label'])
+                
+                for alert in updated_alerts:
+                    writer.writerow([
+                        alert['timestamp'],
+                        alert['src_ip'],
+                        alert['dst_ip'],
+                        alert['alert_type'],
+                        alert['severity'],
+                        alert['description'],
+                        alert['payload'],
+                        alert['review_status']
+                    ])
+                    
+        except Exception as e:
+            print(f"Error saving to CSV: {e}")
+            
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "message": f"Updated {updated_count} alerts to {review_status}"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/alerts/stats/assess', methods=['GET'])
+def get_assessment_stats():
+    """Get review statistics."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Count by review status
+        cursor.execute("""
+            SELECT review_status, COUNT(*) as count
+            FROM alerts
+            GROUP BY review_status
+        """)
+        stats = {row['review_status']: row['count'] for row in cursor.fetchall()}
+        
+        # Total alerts
+        cursor.execute("SELECT COUNT(*) as total FROM alerts")
+        total = cursor.fetchone()['total']
+        
+        conn.close()
+        
+        return jsonify({
+            "total": total,
+            "pending": stats.get('pending', 0),
+            "approved": stats.get('approved', 0),
+            "rejected": stats.get('rejected', 0),
+            "false_positive": stats.get('false_positive', 0)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/alerts/export/assessed', methods=['GET'])
+def export_assessed_alerts():
+    """Export reviewed alerts for ML model retraining."""
+    try:
+        import csv
+        from io import StringIO
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Get only reviewed alerts
+        cursor.execute("""
+            SELECT id, timestamp, src_ip, dst_ip, alert_type, severity,
+                   description, payload, action_taken, review_status,
+                   reviewed_by, reviewed_at, review_notes
+            FROM alerts
+            WHERE reviewed = 1
+            ORDER BY reviewed_at DESC
+        """)
+        
+        alerts = cursor.fetchall()
+        conn.close()
+        
+        # Create CSV
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'id', 'timestamp', 'src_ip', 'dst_ip', 'alert_type', 'severity',
+            'description', 'payload', 'action_taken', 'review_status',
+            'reviewed_by', 'reviewed_at', 'review_notes'
+        ])
+        
+        # Write data
+        for alert in alerts:
+            writer.writerow(alert)
+        
+        csv_data = output.getvalue()
+        
+        return jsonify({
+            "success": True,
+            "data": csv_data,
+            "count": len(alerts)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

@@ -9,6 +9,7 @@ import warnings
 from rich.console import Console
 from .flow_generator import FlowGenerator
 from .ja3_analyzer import JA3Analyzer
+from .fusion_engine import FusionEngine
 import sys
 import os
 
@@ -25,6 +26,7 @@ class Detector:
     def __init__(self, model_dir="IDS/models", feed_path="data/intelligence_feed.json"):
         self.flow_gen = FlowGenerator()
         self.ja3_analyzer = JA3Analyzer()
+        self.fusion_engine = FusionEngine()
         self.db = DBManager()
         self.model = None
         self.scaler = None
@@ -165,22 +167,21 @@ class Detector:
             return None # Not an IP packet or ignored
             
         # Step 3: ML Check (Triggered periodically or on flow finish)
-        # For real-time, we check every N packets or if flow is long enough
-        # Here we check immediately for demonstration
         features = self.flow_gen.extract_features(flow_key)
         
         if features and self.model:
             try:
+                # --- ML PREDICTION ---
                 # Reshape for model (1 sample, 78 features)
                 input_vec = np.array(features).reshape(1, -1)
                 scaled_vec = self.scaler.transform(input_vec)
                 prediction = self.model.predict(scaled_vec)
                 
-                # Get prediction probability if available
-                confidence = 1.0
+                # Get prediction probability
+                ids_confidence = 0.0
                 if hasattr(self.model, 'predict_proba'):
                     proba = self.model.predict_proba(scaled_vec)
-                    confidence = np.max(proba)
+                    ids_confidence = np.max(proba)
                 
                 # Decode label
                 label = "UNKNOWN"
@@ -188,16 +189,32 @@ class Detector:
                     label = self.label_encoder.inverse_transform(prediction)[0]
                 else:
                     label = prediction[0]
+                
+                # Normalize IDS score: If BENIGN, score is 0. If ATTACK, score is confidence.
+                ids_score = ids_confidence if label == "ATTACK" else 0.0
+                
+                # --- OSINT SCORE ---
+                # We already did a fast check, but for fusion we need a score
+                osint_score = 0.0
+                if osint_verdict: # From Step 1
+                     osint_score = 1.0
+                
+                # --- FUSION ENGINE ---
+                final_score, reason = self.fusion_engine.calculate_score(ids_score, osint_score)
+                action = self.fusion_engine.get_verdict(final_score)
+                
+                if action == "BLOCK":
+                    desc = f"FUSION_BLOCK: {reason} | Label: {label}"
+                    self.db.log_alert(src_ip, "FUSION", desc, str(features), "BLOCKED")
+                    if src_ip: self.block_ip(src_ip)
+                    return {"action": "BLOCK", "reason": desc}
                     
-                # Only alert if confidence is above threshold
-                if label == "ATTACK" and confidence >= self.ml_threshold:
-                    desc = f"ML_ANOMALY: Behavioral Detection (confidence: {confidence:.2f})"
-                    self.db.log_alert(src_ip, "ML", desc, str(features), "ALERT")
-                    # Don't block on ML detection, just alert
+                elif action == "REDIRECT":
+                    desc = f"FUSION_REDIRECT: {reason} | Label: {label}"
+                    self.db.log_alert(src_ip, "FUSION", desc, str(features), "ALERT")
                     return {"action": "ALERT", "reason": desc}
                 
-                # Heuristic Fallback: Check for suspicious flags that ML might miss
-                # Index 32 is 'Fwd URG Flags'
+                # Heuristic Fallback (Legacy)
                 if len(features) > 32 and features[32] > 0:
                      reason = "HEURISTIC_ALERT: Suspicious TCP Flags (URG)"
                      self.db.log_alert(src_ip, "HEURISTIC", reason, str(features), "ALERT")
