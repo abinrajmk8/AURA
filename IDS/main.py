@@ -1,6 +1,9 @@
 import argparse
 import sys
 import os
+import json
+from datetime import datetime
+from pathlib import Path
 from scapy.all import sniff, conf
 from rich.console import Console
 from rich.table import Table
@@ -11,6 +14,26 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from core.detector import Detector
 
 console = Console()
+
+# Status file path
+STATUS_DIR = Path("dashboard/api/status")
+STATUS_FILE = STATUS_DIR / "ids.json"
+
+def update_status(enabled, pid=None):
+    """Update IDS status file"""
+    STATUS_DIR.mkdir(parents=True, exist_ok=True)
+    
+    status = {
+        "enabled": enabled,
+        "status": "active" if enabled else "inactive",
+        "pid": pid if enabled else None,
+        "last_started": datetime.now().isoformat() if enabled else None,
+        "last_stopped": None if enabled else datetime.now().isoformat(),
+        "uptime": "0s"
+    }
+    
+    with open(STATUS_FILE, 'w') as f:
+        json.dump(status, f, indent=2)
 
 def get_default_iface():
     """Attempts to find a suitable default interface."""
@@ -25,6 +48,11 @@ def main():
     parser.add_argument("-i", "--interface", help="Network interface to sniff on (e.g., eth0, wlan0)")
     parser.add_argument("--pcap", help="Read from PCAP file instead of live capture")
     args = parser.parse_args()
+
+    # Update status to enabled on startup
+    pid = os.getpid()
+    update_status(enabled=True, pid=pid)
+    console.print(f"[bold green][+] IDS Status: ENABLED (PID: {pid})[/bold green]")
 
     # Initialize Detector
     console.print("[bold blue][*] Initializing AURA IDS Engine...[/bold blue]")
@@ -68,6 +96,10 @@ def main():
         console.print("\n[bold blue][*] IDS Stopped.[/bold blue]")
     except Exception as e:
         console.print(f"\n[bold red][!] Sniffer Error: {e}[/bold red]")
+    finally:
+        # Update status to disabled on shutdown
+        update_status(enabled=False)
+        console.print("[bold yellow][*] IDS Status: DISABLED[/bold yellow]")
 
 if __name__ == "__main__":
     main()

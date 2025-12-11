@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './ServiceCard.css';
 
 const ServiceCard = ({
@@ -15,11 +15,16 @@ const ServiceCard = ({
     const [isEnabled, setIsEnabled] = useState(status === 'active');
     const [isLoading, setIsLoading] = useState(false);
 
+    // Sync toggle state with actual service status
+    useEffect(() => {
+        setIsEnabled(status === 'active');
+    }, [status]);
+
     const handleToggle = async () => {
         setIsLoading(true);
         try {
             await onToggle(!isEnabled);
-            setIsEnabled(!isEnabled);
+            // Don't update isEnabled here - let it update from status prop
         } catch (error) {
             console.error('Failed to toggle service:', error);
         } finally {
@@ -58,10 +63,6 @@ const ServiceCard = ({
                 <div className="service-icon">{icon}</div>
                 <div className="service-title-section">
                     <h3 className="service-title">{serviceName}</h3>
-                    <div className="service-status">
-                        <span className={`status-dot ${getStatusClass()}`}></span>
-                        <span className="status-text">{getStatusText()}</span>
-                    </div>
                 </div>
             </div>
 

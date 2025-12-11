@@ -29,6 +29,16 @@ class Detector:
         self.model = None
         self.scaler = None
         self.label_encoder = None
+        
+        # Whitelist for trusted IPs (router, local network)
+        self.whitelist = {
+            "192.168.29.1",  # Your router
+            "127.0.0.1",     # Localhost
+        }
+        
+        # ML Detection threshold (0.0 to 1.0, higher = less sensitive)
+        self.ml_threshold = 0.8  # Only alert if 80%+ confidence
+        
         self.osint_data = {
             "ips": set(),
             "urls": set(),
@@ -126,6 +136,10 @@ class Detector:
         """Main Pipeline: Packet -> OSINT -> Flow -> ML"""
         
         src_ip = packet['IP'].src if packet.haslayer('IP') else None
+        
+        # Skip whitelisted IPs
+        if src_ip in self.whitelist:
+            return {"action": "PASS", "reason": "Whitelisted IP"}
 
         # Step 1: OSINT Check
         osint_verdict = self.check_osint(packet)
@@ -162,6 +176,12 @@ class Detector:
                 scaled_vec = self.scaler.transform(input_vec)
                 prediction = self.model.predict(scaled_vec)
                 
+                # Get prediction probability if available
+                confidence = 1.0
+                if hasattr(self.model, 'predict_proba'):
+                    proba = self.model.predict_proba(scaled_vec)
+                    confidence = np.max(proba)
+                
                 # Decode label
                 label = "UNKNOWN"
                 if hasattr(self.label_encoder, 'inverse_transform'):
@@ -169,11 +189,11 @@ class Detector:
                 else:
                     label = prediction[0]
                     
-                if label == "ATTACK":
-                    # For ML anomalies, we might want to alert first, or block if confidence is high.
-                    desc = f"ML_ANOMALY: Behavioral Detection"
+                # Only alert if confidence is above threshold
+                if label == "ATTACK" and confidence >= self.ml_threshold:
+                    desc = f"ML_ANOMALY: Behavioral Detection (confidence: {confidence:.2f})"
                     self.db.log_alert(src_ip, "ML", desc, str(features), "ALERT")
-                    if src_ip: self.block_ip(src_ip)
+                    # Don't block on ML detection, just alert
                     return {"action": "ALERT", "reason": desc}
                 
                 # Heuristic Fallback: Check for suspicious flags that ML might miss

@@ -4,6 +4,8 @@ import json
 import csv
 import os
 import sys
+from datetime import datetime
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -21,6 +23,26 @@ console = Console()
 title = Text()
 title.append("AURA", style="bold red")
 title.append(" OSINT HARVESTER", style="bold blue")
+
+# Status file path
+STATUS_DIR = Path("../dashboard/api/status")
+STATUS_FILE = STATUS_DIR / "osint.json"
+
+def update_status(enabled, pid=None):
+    """Update OSINT status file"""
+    STATUS_DIR.mkdir(parents=True, exist_ok=True)
+    
+    status = {
+        "enabled": enabled,
+        "status": "active" if enabled else "inactive",
+        "pid": pid if enabled else None,
+        "last_started": datetime.now().isoformat() if enabled else None,
+        "last_stopped": None if enabled else datetime.now().isoformat(),
+        "uptime": "0s"
+    }
+    
+    with open(STATUS_FILE, 'w') as f:
+        json.dump(status, f, indent=2)
 
 def save_json_with_merge(new_data, path, unique_key):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -50,59 +72,74 @@ def main():
     parser.add_argument("--forecast", action="store_true", help="Run threat forecasting based on Reddit posts")
     args = parser.parse_args()
 
+    # Update status to enabled on startup
+    pid = os.getpid()
+    update_status(enabled=True, pid=pid)
+    console.print(f"[bold green][+] OSINT Status: ENABLED (PID: {pid})[/bold green]")
+
     console.print(Panel.fit(title, border_style="bright_magenta", padding=(1, 4)))
 
-    # Harvest Mode Logic
-    # Run CVE fetcher
-    fetch_cves(args.keyword, args.severity)
+    try:
+        # Harvest Mode Logic
+        # Run CVE fetcher
+        fetch_cves(args.keyword, args.severity)
 
-    # Optional: fetch live OSINT feeds
-    if args.live:
-        console.print("\n[bold green][+][/bold green] [bold blue] Reddit [/bold blue]/r/netsec Posts:")
-        reddit_posts = fetch_reddit(keyword=args.keyword or "CVE")
-        for p in reddit_posts[:5]:
-            print(f"- {p['created']} | {p['title']}")
+        # Optional: fetch live OSINT feeds
+        if args.live:
+            console.print("\n[bold green][+][/bold green] [bold blue] Reddit [/bold blue]/r/netsec Posts:")
+            reddit_posts = fetch_reddit(keyword=args.keyword or "CVE")
+            for p in reddit_posts[:5]:
+                print(f"- {p['created']} | {p['title']}")
 
-        console.print("\n[bold green][+][/bold green] [bold blue] GitHub CVE PoCs: [/bold blue]")
-        github_repos = fetch_github(keyword=args.keyword or "CVE", limit=5)
-        for g in github_repos:
-            print(f"- {g['updated']} | {g['name']} | {g['url']}")
+            console.print("\n[bold green][+][/bold green] [bold blue] GitHub CVE PoCs: [/bold blue]")
+            github_repos = fetch_github(keyword=args.keyword or "CVE", limit=5)
+            for g in github_repos:
+                print(f"- {g['updated']} | {g['name']} | {g['url']}")
 
-        console.print("\n[bold green][+][/bold green] [bold blue]  CISA KEV Listings: [/bold blue] ")
-        cisa_vulns = fetch_cisa()[:3]
-        for v in cisa_vulns:
-            print(f"- {v['cveID']} | {v['vendorProject']} | {v['vulnerabilityName']}")
+            console.print("\n[bold green][+][/bold green] [bold blue]  CISA KEV Listings: [/bold blue] ")
+            cisa_vulns = fetch_cisa()[:3]
+            for v in cisa_vulns:
+                print(f"- {v['cveID']} | {v['vendorProject']} | {v['vulnerabilityName']}")
 
-        # Save JSONs
-        save_json_with_merge(reddit_posts, "data/reddit_posts.json", unique_key="url")
-        save_json_with_merge(github_repos, "data/github_repos.json", unique_key="url")
-        save_json_with_merge(cisa_vulns, "data/cisa_vulns.json", unique_key="cveID")
+            # Save JSONs
+            save_json_with_merge(reddit_posts, "data/reddit_posts.json", unique_key="url")
+            save_json_with_merge(github_repos, "data/github_repos.json", unique_key="url")
+            save_json_with_merge(cisa_vulns, "data/cisa_vulns.json", unique_key="cveID")
 
-        # CSV generation removed as requested
+            # CSV generation removed as requested
 
-        if args.forecast:
-            console.print("\n[bold green][+][/bold green] Running threat forecasting...")
-            threat_forecasts=threat_forecast()
-            save_json_with_merge(threat_forecasts, "data/forecast.json", unique_key="cve_id")
+            if args.forecast:
+                console.print("\n[bold green][+][/bold green] Running threat forecasting...")
+                threat_forecasts=threat_forecast()
+                save_json_with_merge(threat_forecasts, "data/forecast.json", unique_key="cve_id")
 
-    # Optional: run GitHub PoC parser
-    if args.poc:
-        console.print("\n[bold green][+][/bold green] Running GitHub PoC parser (Limit: 1 repo due to rate limits)...")
-        repo_list = load_repos_from_feed("data/github_repos.json")
-        run_github_poc_parser(repo_list, limit=1)
+        # Optional: run GitHub PoC parser
+        if args.poc:
+            console.print("\n[bold green][+][/bold green] Running GitHub PoC parser (Limit: 1 repo due to rate limits)...")
+            repo_list = load_repos_from_feed("data/github_repos.json")
+            run_github_poc_parser(repo_list, limit=1)
 
-    if args.correlate:
-        correlate_pocs_with_feeds(
-            poc_path="data/parsed/poc_output.json",
-            cisa_path="data/cisa_vulns.json",
-            nvd_path="data/latest_cves.json",
-            output_path="./data/parsed/correlated_output.json"
-        )
-    
-    # Always run standardization at the end if any data was fetched
-    console.print("\n[bold green][+][/bold green] Standardizing Intelligence Feed...")
-    std = Standardizer()
-    std.run()
+        if args.correlate:
+            correlate_pocs_with_feeds(
+                poc_path="data/parsed/poc_output.json",
+                cisa_path="data/cisa_vulns.json",
+                nvd_path="data/latest_cves.json",
+                output_path="./data/parsed/correlated_output.json"
+            )
+        
+        # Always run standardization at the end if any data was fetched
+        console.print("\n[bold green][+][/bold green] Standardizing Intelligence Feed...")
+        std = Standardizer()
+        std.run()
+        
+    except KeyboardInterrupt:
+        console.print("\n[bold blue][*] OSINT Harvester Stopped.[/bold blue]")
+    except Exception as e:
+        console.print(f"\n[bold red][!] Error: {e}[/bold red]")
+    finally:
+        # Update status to disabled on shutdown
+        update_status(enabled=False)
+        console.print("[bold yellow][*] OSINT Status: DISABLED[/bold yellow]")
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import sqlite3
 import sys
@@ -8,16 +8,23 @@ from datetime import datetime, timedelta
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
+# Import service controller
+from dashboard.api.service_controller import ServiceController
+
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React dev server
 
 DB_PATH = "database/aura.db"
+
+# Initialize service controller
+service_controller = ServiceController()
 
 def get_db():
     """Get database connection."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 @app.route('/api/alerts/recent', methods=['GET'])
 def get_recent_alerts():
@@ -208,6 +215,160 @@ def get_health():
             "database_status": "error",
             "error": str(e)
         }), 500
+
+# ========================================
+# Service Control Endpoints
+# ========================================
+
+@app.route('/api/control/<service>/start', methods=['POST'])
+def start_service(service):
+    """Start a service (ids, osint, honeypot)"""
+    try:
+        result = service_controller.start_service(service)
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/control/<service>/stop', methods=['POST'])
+def stop_service(service):
+    """Stop a service (ids, osint, honeypot)"""
+    try:
+        result = service_controller.stop_service(service)
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/status/all', methods=['GET'])
+def get_all_status():
+    """Get status of all services"""
+    try:
+        status = service_controller.get_all_status()
+        return jsonify(status), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/status/<service>', methods=['GET'])
+def get_service_status(service):
+    """Get status of a specific service"""
+    try:
+        status = service_controller.get_status(service)
+        if status:
+            return jsonify(status), 200
+        else:
+            return jsonify({"error": "Unknown service"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/osint/search', methods=['POST'])
+def osint_search():
+    """Trigger OSINT search with custom parameters"""
+    try:
+        import subprocess
+        
+        data = request.json
+        keyword = data.get('keyword', '')
+        severity = data.get('severity', '')
+        live = data.get('live', False)
+        poc = data.get('poc', False)
+        correlate = data.get('correlate', False)
+        forecast = data.get('forecast', False)
+        
+        # Build command
+        cmd = ['python3', 'osint-harvester/main.py']
+        
+        if keyword:
+            cmd.extend(['--keyword', keyword])
+        if severity:
+            cmd.extend(['--severity', severity])
+        if live:
+            cmd.append('--live')
+        if poc:
+            cmd.append('--poc')
+        if correlate:
+            cmd.append('--correlate')
+        if forecast:
+            cmd.append('--forecast')
+        
+        # Run OSINT harvester in background
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True
+        )
+        
+        return jsonify({
+            "success": True,
+            "message": "OSINT search started",
+            "pid": process.pid,
+            "parameters": {
+                "keyword": keyword or "All CVEs",
+                "severity": severity or "All",
+                "live": live,
+                "poc": poc,
+                "correlate": correlate,
+                "forecast": forecast
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/osint/results', methods=['GET'])
+def get_osint_results():
+    """Get latest OSINT search results"""
+    try:
+        import json
+        from pathlib import Path
+        
+        results = {
+            "cves": [],
+            "reddit": [],
+            "github": [],
+            "cisa": [],
+            "forecast": []
+        }
+        
+        # Load CVEs
+        cve_file = Path("data/latest_cves.json")
+        if cve_file.exists():
+            with open(cve_file, 'r') as f:
+                results["cves"] = json.load(f)[:20]  # Limit to 20
+        
+        # Load Reddit posts
+        reddit_file = Path("data/reddit_posts.json")
+        if reddit_file.exists():
+            with open(reddit_file, 'r') as f:
+                results["reddit"] = json.load(f)[:10]
+        
+        # Load GitHub repos
+        github_file = Path("data/github_repos.json")
+        if github_file.exists():
+            with open(github_file, 'r') as f:
+                results["github"] = json.load(f)[:10]
+        
+        # Load CISA vulnerabilities
+        cisa_file = Path("data/cisa_vulns.json")
+        if cisa_file.exists():
+            with open(cisa_file, 'r') as f:
+                results["cisa"] = json.load(f)[:10]
+        
+        # Load forecast
+        forecast_file = Path("data/forecast.json")
+        if forecast_file.exists():
+            with open(forecast_file, 'r') as f:
+                results["forecast"] = json.load(f)[:5]
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

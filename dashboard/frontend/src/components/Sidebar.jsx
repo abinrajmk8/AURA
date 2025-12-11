@@ -1,16 +1,19 @@
 import { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import './Sidebar.css';
 
 const Sidebar = () => {
+    const location = useLocation();
     const [activeItem, setActiveItem] = useState('dashboard');
 
     const menuItems = [
-        { id: 'dashboard', icon: '📊', label: 'Dashboard', badge: null },
-        { id: 'threats', icon: '🛡️', label: 'Threats', badge: '12' },
-        { id: 'alerts', icon: '🔔', label: 'Alerts', badge: '5' },
-        { id: 'analytics', icon: '📈', label: 'Analytics', badge: null },
-        { id: 'reports', icon: '📄', label: 'Reports', badge: null },
-        { id: 'settings', icon: '⚙️', label: 'Settings', badge: null },
+        { id: 'dashboard', icon: '📊', label: 'Dashboard', badge: null, path: '/' },
+        { id: 'control', icon: '🎛️', label: 'Control Center', badge: null, path: '/control-center' },
+        { id: 'threats', icon: '🛡️', label: 'Threats', badge: '12', path: '/threats' },
+        { id: 'alerts', icon: '🔔', label: 'Alerts', badge: '5', path: '/alerts' },
+        { id: 'analytics', icon: '📈', label: 'Analytics', badge: null, path: '/analytics' },
+        { id: 'reports', icon: '📄', label: 'Reports', badge: null, path: '/reports' },
+        { id: 'settings', icon: '⚙️', label: 'Settings', badge: null, path: '/settings' },
     ];
 
     return (
@@ -27,9 +30,10 @@ const Sidebar = () => {
 
             <nav className="sidebar-nav">
                 {menuItems.map((item) => (
-                    <button
+                    <Link
                         key={item.id}
-                        className={`nav-item ${activeItem === item.id ? 'active' : ''}`}
+                        to={item.path}
+                        className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
                         onClick={() => setActiveItem(item.id)}
                     >
                         <span className="nav-icon">{item.icon}</span>
@@ -37,7 +41,7 @@ const Sidebar = () => {
                         {item.badge && (
                             <span className="nav-badge badge badge-danger">{item.badge}</span>
                         )}
-                    </button>
+                    </Link>
                 ))}
             </nav>
 
